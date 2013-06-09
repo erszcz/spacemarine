@@ -1,0 +1,608 @@
+<html>
+
+<head>
+<title>Radosław Szymczyszyn - Space Marine</title>
+
+<meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
+<script type="text/javascript" src="Model.js"></script>
+<script type="text/javascript" src="TextureManager.js"></script>
+
+<script id="per-fragment-lighting-fs" type="x-shader/x-fragment">
+    #ifdef GL_ES
+    precision highp float;
+    #endif
+
+    varying vec2 vTextureCoord;
+    varying vec3 vTransformedNormal;
+    varying vec4 vPosition;
+
+    uniform float uMaterialShininess;
+
+    uniform bool uShowSpecularHighlights;
+    uniform bool uUseLighting;
+
+    uniform vec3 uAmbientColor;
+
+    uniform vec3 uPointLightingLocation;
+    uniform vec3 uPointLightingSpecularColor;
+    uniform vec3 uPointLightingDiffuseColor;
+
+    uniform bool uUseTextures;
+    uniform sampler2D uSampler;
+
+
+    void main(void) {
+        vec3 lightWeighting;
+        if (! uUseLighting) {
+            lightWeighting = vec3(1.0, 1.0, 1.0);
+        } else {
+            vec3 lightDirection = normalize(uPointLightingLocation - vPosition.xyz);
+            vec3 normal = normalize(vTransformedNormal);
+
+            float specularLightWeighting = 0.0;
+            if (uShowSpecularHighlights) {
+                vec3 eyeDirection = normalize(-vPosition.xyz);
+                vec3 reflectionDirection = reflect(-lightDirection, normal);
+
+                specularLightWeighting = pow(max(dot(reflectionDirection, eyeDirection), 0.0), uMaterialShininess);
+            }
+
+            float diffuseLightWeighting = max(dot(normal, lightDirection), 0.0);
+            lightWeighting = uAmbientColor
+                + uPointLightingSpecularColor * specularLightWeighting
+                + uPointLightingDiffuseColor * diffuseLightWeighting;
+        }
+
+        vec4 fragmentColor;
+        if (uUseTextures) {
+            fragmentColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+        } else {
+            fragmentColor = vec4(1.0, 1.0, 1.0, 1.0);
+        }
+        gl_FragColor = vec4(fragmentColor.rgb * lightWeighting, fragmentColor.a);
+    }
+</script>
+
+<script id="per-fragment-lighting-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec2 aTextureCoord;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    uniform mat3 uNMatrix;
+
+    varying vec2 vTextureCoord;
+    varying vec3 vTransformedNormal;
+    varying vec4 vPosition;
+
+
+    void main(void) {
+        vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+        gl_Position = uPMatrix * vPosition;
+        vTextureCoord = aTextureCoord;
+        vTransformedNormal = uNMatrix * aVertexNormal;
+    }
+</script>
+
+
+<script type="text/javascript">
+
+    var gl;
+
+    function initGL(canvas) {
+        try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+    }
+
+
+    function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (! shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+
+    var shaderProgram;
+
+    function initShaders() {
+        var fragmentShader = getShader(gl, "per-fragment-lighting-fs");
+        var vertexShader = getShader(gl, "per-fragment-lighting-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram,
+            "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+        shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram,
+            "aVertexNormal");
+        gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+        shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram,
+            "aTextureCoord");
+        gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+        shaderProgram.nMatrixUniform = gl.getUniformLocation(shaderProgram, "uNMatrix");
+        shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+        shaderProgram.materialShininessUniform = gl.getUniformLocation(shaderProgram, "uMaterialShininess");
+        shaderProgram.showSpecularHighlightsUniform = gl.getUniformLocation(shaderProgram, "uShowSpecularHighlights");
+        shaderProgram.useTexturesUniform = gl.getUniformLocation(shaderProgram, "uUseTextures");
+        shaderProgram.useLightingUniform = gl.getUniformLocation(shaderProgram, "uUseLighting");
+        shaderProgram.ambientColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientColor");
+        shaderProgram.pointLightingLocationUniform = gl.getUniformLocation(shaderProgram, "uPointLightingLocation");
+        shaderProgram.pointLightingSpecularColorUniform = gl.getUniformLocation(shaderProgram, "uPointLightingSpecularColor");
+        shaderProgram.pointLightingDiffuseColorUniform = gl.getUniformLocation(shaderProgram, "uPointLightingDiffuseColor");
+    }
+
+
+    var mvMatrix = mat4.create();
+    var mvMatrixStack = [];
+    var pMatrix = mat4.create();
+
+    function mvPushMatrix() {
+        var copy = mat4.create();
+        mat4.set(mvMatrix, copy);
+        mvMatrixStack.push(copy);
+    }
+
+    function mvPopMatrix() {
+        if (mvMatrixStack.length == 0) {
+            throw "Invalid popMatrix!";
+        }
+        mvMatrix = mvMatrixStack.pop();
+    }
+
+    function setMatrixUniforms() {
+        gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+
+        var normalMatrix = mat3.create();
+        mat4.toInverseMat3(mvMatrix, normalMatrix);
+        mat3.transpose(normalMatrix);
+        gl.uniformMatrix3fv(shaderProgram.nMatrixUniform, false, normalMatrix);
+    }
+
+    function degToRad(degrees) {
+        return degrees * Math.PI / 180;
+    }
+
+
+    var sceneAngle = 0;
+
+    function drawScene() {
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 200.0, pMatrix);
+
+        mat4.identity(mvMatrix);
+
+        mat4.translate(mvMatrix, [0, 30, -120]);
+        mat4.rotate(mvMatrix, degToRad(sceneAngle), [0, 1, 0]);
+        mat4.rotate(mvMatrix, degToRad(-40), [0, 1, 0]);
+
+        marine.draw();
+    }
+
+    Marine = function () {
+        this.head = new Model("spacemarine-head.json");
+        this.head.texture = "darkangel_2.png";
+        this.head.draw = Marine_drawPart;
+
+        this.upper = new Model("spacemarine-upper.json");
+        this.upper.texture = "darkangel_1.png";
+        this.upper.draw = Marine_drawPart;
+
+        this.armleft = new Model("spacemarine-armleft.json");
+        this.armleft.texture = "darkangel_2.png";
+        this.armleft.draw = Marine_drawPart;
+
+        this.armright = new Model("spacemarine-armright.json");
+        this.armright.texture = "darkangel_2.png";
+        this.armright.draw = Marine_drawPart;
+
+        this.lower = new Model("spacemarine-lower.json");
+        this.lower.texture = "darkangel_2.png";
+        this.lower.draw = Marine_drawPart;
+
+        //this.bolter = new Model("bolter.json");
+        //this.bolter.draw = Bolter_draw;
+    }
+
+    Bolter_draw = function () {
+        mvPushMatrix();
+        mat4.translate(mvMatrix, [3, 19, 12]);
+        mat4.scale(mvMatrix, [10, 9, 9]);
+        mat4.rotate(mvMatrix, degToRad(-5), [0, 1, 0]);
+        mat4.rotate(mvMatrix, degToRad(-90), [1, 0, 0]);
+
+        gl.uniform1i(shaderProgram.useTexturesUniform, false);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute,
+            this.vertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexTextureCoordBuffer);
+        gl.vertexAttribPointer(shaderProgram.textureCoordAttribute,
+            this.vertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexNormalBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute,
+            this.vertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.vertexIndexBuffer);
+        setMatrixUniforms();
+        gl.drawElements(gl.TRIANGLES, this.vertexIndexBuffer.numItems,
+            gl.UNSIGNED_SHORT, 0);
+
+        mvPopMatrix();
+    }
+
+    Marine_drawPart = function () {
+        mvPushMatrix();
+        mat4.rotate(mvMatrix, degToRad(-90), [1, 0, 0]);
+        gl.uniform1i(shaderProgram.useTexturesUniform, true);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexTextureCoordBuffer);
+        gl.vertexAttribPointer(shaderProgram.textureCoordAttribute,
+            this.vertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        TextureManager.bind(this.texture);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute,
+            this.vertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexTextureCoordBuffer);
+        gl.vertexAttribPointer(shaderProgram.textureCoordAttribute,
+            this.vertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexNormalBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute,
+            this.vertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.vertexIndexBuffer);
+        setMatrixUniforms();
+        gl.drawElements(gl.TRIANGLES, this.vertexIndexBuffer.numItems,
+            gl.UNSIGNED_SHORT, 0);
+
+        gl.uniform1i(shaderProgram.useTexturesUniform, false);
+        mvPopMatrix();
+    }
+
+    Marine.prototype.draw = function () {
+
+        var specularHighlights = document.getElementById("specular").checked;
+        gl.uniform1i(shaderProgram.showSpecularHighlightsUniform, specularHighlights);
+
+        var lighting = document.getElementById("lighting").checked;
+        gl.uniform1i(shaderProgram.useLightingUniform, lighting);
+        if (lighting) {
+            gl.uniform3f(
+                shaderProgram.ambientColorUniform,
+                parseFloat(document.getElementById("ambientR").value),
+                parseFloat(document.getElementById("ambientG").value),
+                parseFloat(document.getElementById("ambientB").value)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingLocationUniform,
+                parseFloat(document.getElementById("lightPositionX").value),
+                parseFloat(document.getElementById("lightPositionY").value),
+                parseFloat(document.getElementById("lightPositionZ").value)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingSpecularColorUniform,
+                parseFloat(document.getElementById("specularR").value),
+                parseFloat(document.getElementById("specularG").value),
+                parseFloat(document.getElementById("specularB").value)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingDiffuseColorUniform,
+                parseFloat(document.getElementById("diffuseR").value),
+                parseFloat(document.getElementById("diffuseG").value),
+                parseFloat(document.getElementById("diffuseB").value)
+            );
+        }
+
+        gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+        gl.uniform1f(shaderProgram.materialShininessUniform,
+            parseFloat(document.getElementById("shininess").value));
+
+
+        mvPushMatrix();
+
+        mat4.translate(mvMatrix, [0, -10, 1]);
+        mvPushMatrix();
+        mat4.rotate(mvMatrix, degToRad(5), [1, 0, 0]);
+        mat4.rotate(mvMatrix, degToRad(-10), [1, 0, -1]);
+        this.head.draw();
+        mvPopMatrix();
+
+        mat4.translate(mvMatrix, [0, -14.7, -2]);
+        this.upper.draw();
+        this.armleft.draw();
+        this.armright.draw();
+
+        mat4.translate(mvMatrix, [0, -13, 0]);
+        this.lower.draw();
+
+        //this.bolter.draw();
+
+        mvPopMatrix();
+    }
+
+
+    Marine.prototype.update = function () {
+        var radios = document.getElementsByName("skin");
+        for (var i = 0; i < radios.length; i++)
+            if (radios[i].checked) {
+                var skin = radios[i].value;
+                this.head.texture     = skin + "_2.png";
+                this.upper.texture    = skin + "_1.png";
+                this.armleft.texture  = skin + "_2.png";
+                this.armright.texture = skin + "_2.png";
+                this.lower.texture    = skin + "_2.png";
+                break;
+            }
+    }
+
+
+    var lastTime = 0;
+
+    function animate() {
+        var timeNow = new Date().getTime();
+        if (lastTime != 0) {
+            var elapsed = timeNow - lastTime;
+
+            marine.update();
+
+            if (! document.getElementById("pause").checked)
+                sceneAngle += 0.05 * elapsed;
+        }
+        lastTime = timeNow;
+    }
+
+
+    function tick() {
+        requestAnimFrame(tick);
+        drawScene();
+        animate();
+    }
+
+    var marine;
+
+    function webGLStart() {
+        var canvas = document.getElementById("canvas");
+        initGL(canvas);
+        initShaders();
+
+        var textures = [
+            "blue_1.png",
+            "blue_2.png",
+            "darkangel_1.png",
+            "darkangel_2.png",
+            "default_1.png",
+            "default_2.png",
+            "lotd_1.png",
+            "lotd_2.png",
+            "red_1.png",
+            "red_2.png"
+        ];
+        TextureManager.loadAll(textures);
+
+        marine = new Marine();
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+
+        tick();
+    }
+
+</script>
+
+
+<style type="text/css">
+
+* {
+  font-family: sans-serif;
+}
+
+html, body {
+  background-color: black;
+  color: gray;
+}
+
+.center {
+  margin: 0 auto;
+}
+
+#canvas {
+  margin: 0 auto;
+  width: 500px;
+  display: block;
+}
+
+div.content {
+  min-width: 560px;
+  width: 40%;
+}
+
+.content p {
+  text-align: justify;
+}
+
+</style>
+
+
+</head>
+
+
+<body onload="webGLStart();">
+
+  <div class="center content">
+
+    <h1>Grafika komputerowa:<br /> Space Marine</h1>
+    <h3 style="font-size: small">Radosław Szymczyszyn &lt;lavrin at gmail dot com&gt;</h3>
+
+    <canvas id="canvas" class="center" width="500" height="500"></canvas>
+
+    <br/>
+
+    <input type="checkbox" id="specular" checked="checked" /> Show specular highlight<br/>
+    <input type="checkbox" id="lighting" checked="checked" /> Use lighting<br/><br/>
+
+    <input type="checkbox" id="pause" /> Pause<br/>
+
+    <h2>Skin</h2>
+
+    <form>
+      <input type="radio" name="skin" value="blue" />
+      <img src="icon_blue.png" alt="blue" />
+
+      <input type="radio" name="skin" value="darkangel" checked="true" />
+      <img src="icon_darkangel.png" alt="darkangel" />
+
+      <input type="radio" name="skin" value="default" />
+      <img src="icon_default.png" alt="default" />
+
+      <input type="radio" name="skin" value="lotd" />
+      <img src="icon_lotd.png" alt="lotd" />
+
+      <input type="radio" name="skin" value="red" />
+      <img src="icon_red.png" alt="red" />
+
+    </form>
+
+    <h2>Material</h2>
+
+    <p><b>Shininess</b><br />
+    <input type="text" id="shininess" value="32.0" /></p>
+
+
+    <h2>Point light</h2>
+
+    <table style="border: 0; padding: 10px;">
+        <tr colspan="3"><td><b>Location</b></tr>
+        <tr>
+            <td>X: <input type="text" id="lightPositionX" value="-10.0" />
+            <td>Y: <input type="text" id="lightPositionY" value="4.0" />
+            <td>Z: <input type="text" id="lightPositionZ" value="-20.0" />
+        </tr>
+        <tr><td><b><br />Specular colour</b></tr>
+        <tr>
+            <td>R: <input type="text" id="specularR" value="0.8" />
+            <td>G: <input type="text" id="specularG" value="0.8" />
+            <td>B: <input type="text" id="specularB" value="0.8" />
+        </tr>
+        <tr><td><b><br />Diffuse colour</b></tr>
+        <tr>
+            <td>R: <input type="text" id="diffuseR" value="0.8" />
+            <td>G: <input type="text" id="diffuseG" value="0.8" />
+            <td>B: <input type="text" id="diffuseB" value="0.8" />
+        </tr>
+    </table>
+
+
+    <h2>Ambient light colour</h2>
+
+    <table style="border: 0; padding: 10px">
+      <tr>
+        <td>Red</td>
+        <td>Green</td>
+        <td>Blue</td>
+      </tr>
+      <tr>
+        <td><input type="text" id="ambientR" value="0.2" /></td>
+        <td><input type="text" id="ambientG" value="0.2" /></td>
+        <td><input type="text" id="ambientB" value="0.2" /></td>
+      </tr>
+    </table>
+
+    <h2>About</h2>
+
+    <p>The model is a fan-made Quake III Arena model made by Chris Glenn
+    and skinned/textured by Chris Glenn and Jeremy Bone. It was imported
+    into Blender by a third-party import script. Blender allows for
+    easy export to JSON format, which can be straightforwardly used in JavaScript
+    and WebGL.</p>
+
+    <p>Overall, the demo was based on great WebGL lessons by Giles Thomas,
+    linked in the references.</p>
+
+    <p>The animation presents a fully textured model using a few rendering
+    techniques. Firstly, it can be rendered with just the texture and no lighting
+    at all. Secondly, basic lighting may be turned on. Basic means that ambient
+    and directional lights are taken into account when shading the object.
+    The third mode is to also apply the specular lighting, i.e. lights wich reflect
+    from objects' surfaces straight into the eye of the observer. As all, the position
+    of the object, the light source and the observer must be taken into account for
+    each rendered fragment, it is by far the most expensive rendering technique.</p>
+
+    <h2>References</h2>
+    <ul>
+      <li><a href="http://learningwebgl.com/blog/?page_id=1217">
+        Learning WebGL by Giles Thomas
+      </a></li>
+      <li><a href="http://www.blender.org/">Blender main site</a></li>
+    </ul>
+
+  </div>
+
+</body>
+
+</html>
