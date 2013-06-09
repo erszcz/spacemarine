@@ -3,17 +3,20 @@
 This is a project I made (some time ago) for one of the courses at the
 univeristy.
 
-The model is a fan-made Quake III Arena model "sculpted" by Chris Glenn
-and skinned/textured by Chris Glenn and Jeremy Bone. It was imported
-into [Blender][blender] by a third-party import script. Blender allows for
-easy export to JSON format, which can be straightforwardly used in JavaScript
-and WebGL.
+The mesh is a fan-made Quake III Arena model "sculpted" by Chris Glenn
+and skinned/textured by Chris Glenn and Jeremy Bone.
+The [original package for Quake][mesh] is still available for download
+from [ioquake3.org][].
+I imported it into [Blender][blender] by a third-party import script.
+Blender allows for easy export to JSON format,
+which can be straightforwardly used in JavaScript and WebGL.
 
 Overall, the demo was based on [great WebGL lessons by Giles Thomas][webgl],
 linked in the references.
 
-[webgl]:   http://learningwebgl.com/blog/?page_id=1217
-[blender]: http://www.blender.org/
+[mesh]:     http://ioquake3.org/extras/models/
+[blender]:  http://www.blender.org/
+[webgl]:    http://learningwebgl.com/blog/?page_id=1217
 
 The animation presents a fully textured model using a few rendering
 techniques. Firstly, it can be rendered with just the texture and no lighting
